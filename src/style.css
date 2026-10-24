@@ -98,6 +98,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .ready-indicator span { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 4px rgba(216,239,114,.16); }
 .ready-indicator.cooling { color: #d2dfc3; }
 .ready-indicator.cooling span { background: #9fb68a; box-shadow: none; }
+.ready-indicator.boosted { color: #b9fbf4; }
+.ready-indicator.boosted span { background: #75e6ef; box-shadow: 0 0 0 4px rgba(117,230,239,.18), 0 0 14px #75e6ef; }
 .hint {
   position: absolute; z-index: 2; bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px)); left: 50%; transform: translateX(-50%);
   width: max-content; max-width: 90%; padding: 7px 13px; border-radius: 20px;

@@ -21,7 +21,7 @@ const ui = {
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#78a957');
-scene.fog = new THREE.Fog('#78a957', 16, 36);
+scene.fog = new THREE.Fog('#78a957', 24, 70);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -251,8 +251,11 @@ const state = {
   x: 20, z: 20, score: 0, nextInsectGrowth: 10, growth: 0, palette: 0,
   gameTime: 0, nextHop: 0, jump: null, queued: null, held: null,
   paused: false, muted: false, currentScale: BASE_SCALE, targetScale: BASE_SCALE,
-  zoom: 1, frogsEaten: 0,
+  zoom: 1, manualZoom: 1, zoomTarget: 1, frogsEaten: 0,
+  boostUntil: 0, boosterCooldown: 0, nextBoosterCheck: 0,
 };
+const panOffset = new THREE.Vector3();
+let minZoom = .16;
 frog.position.set(state.x * TILE, 0, state.z * TILE);
 frog.rotation.y = Math.PI;
 frogVisual.scale.setScalar(BASE_SCALE);
@@ -305,7 +308,8 @@ function burstAt(x, z, large = false) {
 }
 
 function updatePlayerPalette() {
-  const nextPalette = Math.min(Math.floor(state.growth / 2), palettes.length - 1);
+  const growthRatio = state.targetScale / BASE_SCALE - 1;
+  const nextPalette = Math.min(Math.floor(growthRatio / .8), palettes.length - 1);
   const changed = nextPalette !== state.palette;
   state.palette = nextPalette;
   const palette = palettes[nextPalette];
@@ -323,6 +327,7 @@ function updatePlayerPalette() {
 function growPlayer(kind = 'insects') {
   state.growth++;
   state.targetScale *= 1.1;
+  updateAutoZoom();
   const transformation = updatePlayerPalette();
   if (transformation) {
     showToast(transformation === 'Crowned shadow' ? 'Final form · Crowned shadow' : `${transformation} transformation`, 1900);
@@ -394,10 +399,14 @@ function tryHop(direction) {
     state.nextHop = state.gameTime + .25;
     return false;
   }
-  state.jump = { fromX: state.x * TILE, fromZ: state.z * TILE, toX: nextX * TILE, toZ: nextZ * TILE, start: state.gameTime };
+  const boosted = state.gameTime < state.boostUntil;
+  state.jump = {
+    fromX: state.x * TILE, fromZ: state.z * TILE, toX: nextX * TILE, toZ: nextZ * TILE,
+    start: state.gameTime, duration: boosted ? HOP_DURATION / 2 : HOP_DURATION,
+  };
   state.x = nextX;
   state.z = nextZ;
-  state.nextHop = state.gameTime + HOP_COOLDOWN;
+  state.nextHop = state.gameTime + (boosted ? HOP_COOLDOWN / 2 : HOP_COOLDOWN);
   state.queued = null;
   frog.rotation.y = data.rotation;
   playTone('hop');
@@ -515,6 +524,63 @@ function checkRivalCollisions() {
   }
 }
 
+// A distinctive firefly appears nearby only when every rival is at least 15 tiles away.
+let booster = null;
+const boosterBodyGeometry = new THREE.SphereGeometry(.11, 7, 5);
+const boosterWingGeometry = new THREE.OctahedronGeometry(.12, 0);
+const boosterBodyMaterial = new THREE.MeshStandardMaterial({ color: '#8ff7e8', emissive: '#29a9aa', emissiveIntensity: 1.2, flatShading: true });
+const boosterWingMaterial = new THREE.MeshBasicMaterial({ color: '#f6e979', transparent: true, opacity: .85 });
+function spawnBooster() {
+  const angle = random() * Math.PI * 2;
+  const distance = 2 + Math.floor(random() * 2);
+  const x = clamp(state.x + Math.round(Math.cos(angle) * distance), 0, GRID_SIZE - 1);
+  const z = clamp(state.z + Math.round(Math.sin(angle) * distance), 0, GRID_SIZE - 1);
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(boosterBodyGeometry, boosterBodyMaterial);
+  group.add(body);
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Mesh(boosterWingGeometry, boosterWingMaterial);
+    wing.position.x = side * .13;
+    wing.scale.set(.8, .25, 1.25);
+    group.add(wing);
+  }
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(.23, .018, 4, 16), new THREE.MeshBasicMaterial({ color: '#c8fff0' }));
+  ring.rotation.x = Math.PI / 2;
+  group.add(ring);
+  group.position.set(x * TILE, .45, z * TILE);
+  group.scale.setScalar(0);
+  world.add(group);
+  booster = { x, z, group, born: state.gameTime };
+  showToast('A speed insect appeared nearby!', 1700);
+}
+function collectBooster() {
+  if (!booster) return;
+  world.remove(booster.group);
+  booster = null;
+  state.boostUntil = state.gameTime + 12;
+  state.boosterCooldown = state.gameTime + 25;
+  state.nextBoosterCheck = state.gameTime + 25;
+  burstAt(state.x * TILE, state.z * TILE, true);
+  showToast('Speed boost · Half-second hops!', 1900);
+  playTone('grow');
+}
+function updateBooster() {
+  if (!booster && state.gameTime >= state.nextBoosterCheck && state.gameTime >= state.boosterCooldown) {
+    state.nextBoosterCheck = state.gameTime + 2;
+    const distances = aiFrogs.filter((ai) => ai.alive).map((ai) => Math.hypot(ai.x - state.x, ai.z - state.z));
+    const nearest = distances.length ? Math.min(...distances) : Infinity;
+    if (nearest >= 15) spawnBooster();
+  }
+  if (!booster) return;
+  const age = state.gameTime - booster.born;
+  const emerge = Math.min(1, age * 3);
+  booster.group.scale.setScalar(emerge * (1 + Math.sin(age * 5) * .08));
+  booster.group.position.y = .45 + Math.sin(age * 4) * .09;
+  booster.group.rotation.y += .035;
+  const distance = Math.hypot(frog.position.x - booster.x * TILE, frog.position.z - booster.z * TILE);
+  if (distance < state.currentScale * .55 + .22) collectBooster();
+}
+
 function setPaused(paused) {
   state.paused = paused;
   state.held = null;
@@ -565,46 +631,97 @@ window.addEventListener('keyup', (event) => {
   if (swipe && directionFromSwipe(...swipe) === state.held) state.held = null;
 });
 
+function updateAutoZoom(immediate = false) {
+  const baseWidth = camera.right - camera.left;
+  minZoom = baseWidth / 32;
+  // A heavy frog keeps four clear tiles on each side whenever the viewport allows it.
+  const safetyZoom = state.targetScale < 1.2 ? 1 : clamp(baseWidth / (state.targetScale * 1.4 + 8), minZoom, 3);
+  state.zoomTarget = clamp(Math.min(state.manualZoom, safetyZoom), minZoom, 3);
+  if (immediate) {
+    state.zoom = state.zoomTarget;
+    camera.zoom = state.zoom;
+    camera.updateProjectionMatrix();
+  }
+}
 function setZoom(value) {
-  state.zoom = clamp(value, .65, 3);
-  camera.zoom = state.zoom;
-  camera.updateProjectionMatrix();
+  state.manualZoom = clamp(value, minZoom, 3);
+  updateAutoZoom(true);
 }
 const pointers = new Map();
 let swipeStart = null;
 let pinchStart = null;
+let pointerStartedAt = 0;
+let panning = false;
+let panMoveCount = 0;
+const panStartOffset = new THREE.Vector3();
+function panCamera(dx, dy) {
+  const worldPerPixel = (camera.top - camera.bottom) / state.zoom / renderer.domElement.clientHeight;
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  right.y = 0;
+  up.y = 0;
+  right.normalize();
+  up.normalize();
+  panOffset.addScaledVector(right, -dx * worldPerPixel);
+  panOffset.addScaledVector(up, dy * worldPerPixel);
+  const limit = GRID_SIZE * TILE / 2;
+  panOffset.x = clamp(panOffset.x, -limit, limit);
+  panOffset.z = clamp(panOffset.z, -limit, limit);
+}
 renderer.domElement.addEventListener('pointerdown', (event) => {
   renderer.domElement.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-  if (pointers.size === 1) swipeStart = { x: event.clientX, y: event.clientY };
+  if (pointers.size === 1) {
+    swipeStart = { x: event.clientX, y: event.clientY };
+    pointerStartedAt = event.timeStamp;
+    panStartOffset.copy(panOffset);
+    panMoveCount = 0;
+    panning = false;
+  }
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     pinchStart = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: state.zoom };
     swipeStart = null;
+    panning = false;
   }
 });
 renderer.domElement.addEventListener('pointermove', (event) => {
   if (!pointers.has(event.pointerId)) return;
+  const previous = pointers.get(event.pointerId);
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (pointers.size === 2 && pinchStart) {
     const [a, b] = [...pointers.values()];
     const distance = Math.hypot(a.x - b.x, a.y - b.y);
     if (distance > 5 && pinchStart.distance > 5) setZoom(pinchStart.zoom * distance / pinchStart.distance);
+    return;
+  }
+  if (pointers.size === 1 && swipeStart) {
+    const totalDistance = Math.hypot(event.clientX - swipeStart.x, event.clientY - swipeStart.y);
+    panMoveCount++;
+    if (!panning && panMoveCount >= 2 && totalDistance > 10 && event.timeStamp - pointerStartedAt > 300) panning = true;
+    if (panning) panCamera(event.clientX - previous.x, event.clientY - previous.y);
   }
 });
 function endPointer(event) {
   const wasPinching = Boolean(pinchStart);
+  const wasPanning = panning;
   pointers.delete(event.pointerId);
   if (wasPinching) {
     if (pointers.size < 2) pinchStart = null;
     swipeStart = null;
+    panning = false;
     return;
   }
   if (swipeStart && pointers.size === 0) {
     const dx = event.clientX - swipeStart.x;
     const dy = event.clientY - swipeStart.y;
+    const duration = event.timeStamp - pointerStartedAt;
     swipeStart = null;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) >= 24) requestHop(directionFromSwipe(dx, dy));
+    panning = false;
+    if ((!wasPanning || duration < 500) && Math.max(Math.abs(dx), Math.abs(dy)) >= 24) {
+      if (wasPanning) panOffset.copy(panStartOffset);
+      requestHop(directionFromSwipe(dx, dy));
+    }
   }
 }
 renderer.domElement.addEventListener('pointerup', endPointer);
@@ -626,6 +743,7 @@ function resize() {
   camera.top = frustumHeight / 2;
   camera.bottom = -frustumHeight / 2;
   camera.updateProjectionMatrix();
+  updateAutoZoom(true);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -645,7 +763,7 @@ function animate() {
     }
     if (state.jump) {
       const jump = state.jump;
-      const t = Math.min((state.gameTime - jump.start) / HOP_DURATION, 1);
+      const t = Math.min((state.gameTime - jump.start) / jump.duration, 1);
       const eased = t * t * (3 - 2 * t);
       frog.position.x = THREE.MathUtils.lerp(jump.fromX, jump.toX, eased);
       frog.position.z = THREE.MathUtils.lerp(jump.fromZ, jump.toZ, eased);
@@ -658,7 +776,7 @@ function animate() {
         consumeInsectsAround(state.x, state.z, state.currentScale, state);
         if (!hintChanged) {
           hintChanged = true;
-          ui.hint.textContent = 'Eat smaller frogs · Pinch to zoom';
+          ui.hint.textContent = 'Eat smaller frogs · Boosters give 2× speed';
           setTimeout(() => ui.hint.classList.add('hidden'), 6000);
         }
       }
@@ -670,6 +788,7 @@ function animate() {
     frogShadow.material.opacity = .26 - frog.position.y * .12;
     aiFrogs.forEach((ai) => updateAi(ai, rawDt));
     checkRivalCollisions();
+    updateBooster();
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const particle = particles[i];
@@ -683,7 +802,12 @@ function animate() {
       if (particle.life <= 0) { world.remove(particle.mesh); particles.splice(i, 1); }
     }
   }
-  targetFocus.set(frog.position.x, .15, frog.position.z);
+  if (Math.abs(state.zoom - state.zoomTarget) > .0001) {
+    state.zoom = THREE.MathUtils.damp(state.zoom, state.zoomTarget, 4, rawDt);
+    camera.zoom = state.zoom;
+    camera.updateProjectionMatrix();
+  }
+  targetFocus.set(frog.position.x + panOffset.x, .15, frog.position.z + panOffset.z);
   cameraFocus.lerp(targetFocus, 1 - Math.exp(-rawDt * 5));
   camera.position.copy(cameraFocus).add(cameraOffset);
   camera.lookAt(cameraFocus);
@@ -691,8 +815,10 @@ function animate() {
   sun.target.position.copy(cameraFocus);
   sun.target.updateMatrixWorld();
   const cooling = Boolean(state.jump) || state.gameTime < state.nextHop;
-  ui.ready.classList.toggle('cooling', cooling);
-  ui.ready.lastChild.textContent = cooling ? ' RECHARGING' : ' READY TO HOP';
+  const boosted = state.gameTime < state.boostUntil;
+  ui.ready.classList.toggle('cooling', cooling && !boosted);
+  ui.ready.classList.toggle('boosted', boosted);
+  ui.ready.lastChild.textContent = boosted ? ' 2× SPEED' : cooling ? ' RECHARGING' : ' READY TO HOP';
   renderer.render(scene, camera);
   if (firstFrame) {
     firstFrame = false;
@@ -708,6 +834,8 @@ window.__frogGame = {
     x: state.x, z: state.z, score: state.score, growth: state.growth, palette: palettes[state.palette].name,
     size: state.currentScale, targetSize: state.targetScale, zoom: state.zoom, paused: state.paused,
     frogsEaten: state.frogsEaten, livingRivals: aiFrogs.filter((ai) => ai.alive).length,
+    boostRemaining: Math.max(0, state.boostUntil - state.gameTime), boosterActive: Boolean(booster),
+    pan: { x: panOffset.x, z: panOffset.z },
   }),
   hop: requestHop,
   swipe: (dx, dy) => requestHop(directionFromSwipe(dx, dy)),
