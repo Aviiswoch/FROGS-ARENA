@@ -36,7 +36,7 @@ ui.scene.appendChild(renderer.domElement);
 renderer.domElement.setAttribute('aria-hidden', 'true');
 
 const camera = new THREE.OrthographicCamera(-4, 4, 6, -6, 0.1, 100);
-const cameraOffset = new THREE.Vector3(7.8, 10.5, 9.5);
+const cameraOffset = new THREE.Vector3(12, 12, 12);
 const cameraFocus = new THREE.Vector3(20, 0, 20);
 camera.position.copy(cameraFocus).add(cameraOffset);
 camera.lookAt(cameraFocus);
@@ -63,78 +63,24 @@ const random = () => {
 };
 const clamp = THREE.MathUtils.clamp;
 
-// Flush tile tops preserve the checker pattern without artificial boundary lines.
-const tiles = new THREE.InstancedMesh(
-  new THREE.BoxGeometry(TILE + 0.006, 0.18, TILE + 0.006),
-  new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true }),
-  MAX_INSECTS,
-);
-tiles.receiveShadow = true;
-const lightGrass = new THREE.Color('#83b94f');
-const darkGrass = new THREE.Color('#70a443');
-let tileIndex = 0;
-for (let z = 0; z < GRID_SIZE; z++) {
-  for (let x = 0; x < GRID_SIZE; x++) {
-    dummy.position.set(x * TILE, -0.1, z * TILE);
-    dummy.rotation.set(0, 0, 0);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    tiles.setMatrixAt(tileIndex, dummy.matrix);
-    const color = ((x + z) % 2 === 0 ? lightGrass : darkGrass).clone();
-    color.offsetHSL(0, 0, ((x * 17 + z * 31) % 7) * 0.003);
-    tiles.setColorAt(tileIndex, color);
-    tileIndex++;
-  }
-}
-tiles.instanceMatrix.needsUpdate = true;
-tiles.instanceColor.needsUpdate = true;
-world.add(tiles);
-
-const earth = new THREE.Mesh(
-  new THREE.BoxGeometry(GRID_SIZE * TILE + 0.25, 0.5, GRID_SIZE * TILE + 0.25),
-  new THREE.MeshStandardMaterial({ color: '#527b38', roughness: 1, flatShading: true }),
-);
-earth.position.set((GRID_SIZE - 1) * TILE / 2, -0.42, (GRID_SIZE - 1) * TILE / 2);
-earth.receiveShadow = true;
-world.add(earth);
-
-// Each tuft contains four bent, tapered 3D blades rather than a flat grass texture.
-function createGrassTuftGeometry() {
-  const positions = [];
-  for (let blade = 0; blade < 4; blade++) {
-    const angle = blade * Math.PI / 2 + .35;
-    const right = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
-    const lean = new THREE.Vector3(Math.sin(angle) * .09, 0, Math.cos(angle) * .09);
-    const baseLeft = right.clone().multiplyScalar(-.035);
-    const baseRight = right.clone().multiplyScalar(.035);
-    const midLeft = right.clone().multiplyScalar(-.026).add(new THREE.Vector3(0, .16, 0)).addScaledVector(lean, .35);
-    const midRight = right.clone().multiplyScalar(.026).add(new THREE.Vector3(0, .16, 0)).addScaledVector(lean, .35);
-    const tip = new THREE.Vector3(0, .34 + blade * .018, 0).add(lean);
-    for (const point of [baseLeft, baseRight, midRight, baseLeft, midRight, midLeft, midLeft, midRight, tip]) positions.push(point.x, point.y, point.z);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
-const tuftCount = 4800;
-const tufts = new THREE.InstancedMesh(
-  createGrassTuftGeometry(),
-  new THREE.MeshStandardMaterial({ color: '#568e3c', roughness: .95, flatShading: true, side: THREE.DoubleSide }),
-  tuftCount,
-);
-for (let i = 0; i < tuftCount; i++) {
-  const x = Math.floor(random() * GRID_SIZE);
-  const z = Math.floor(random() * GRID_SIZE);
-  dummy.position.set(x * TILE + (random() - .5) * .9, 0, z * TILE + (random() - .5) * .9);
-  dummy.rotation.set((random() - .5) * .08, random() * Math.PI, (random() - .5) * .08);
-  dummy.scale.set(.65 + random() * .65, .45 + random() * .8, .65 + random() * .65);
-  dummy.updateMatrix();
-  tufts.setMatrixAt(i, dummy.matrix);
-  tufts.setColorAt(i, new THREE.Color((x + z) % 2 ? '#4f8738' : '#639b40'));
-}
-tufts.instanceColor.needsUpdate = true;
-world.add(tufts);
+// The gameplay matrix remains 40x40; only its visual ground is replaced by the painted board.
+let groundReady = false;
+const groundMaterial = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, metalness: 0 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(GRID_SIZE * TILE, GRID_SIZE * TILE), groundMaterial);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set((GRID_SIZE - 1) * TILE / 2, -.025, (GRID_SIZE - 1) * TILE / 2);
+ground.receiveShadow = true;
+world.add(ground);
+new THREE.TextureLoader().load('/images/arena-grass.jpg', (texture) => {
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(12, renderer.capabilities.getMaxAnisotropy());
+  groundMaterial.map = texture;
+  groundMaterial.needsUpdate = true;
+  groundReady = true;
+}, undefined, () => {
+  groundMaterial.color.set('#668d3f');
+  groundReady = true;
+});
 
 // A low-poly city park: iron fence, sidewalks, four roads, gardens, towers and moving taxis.
 const city = new THREE.Group();
@@ -884,12 +830,16 @@ function directionFromSwipe(dx, dy) {
   let bestDirection = 'up';
   let bestDot = -Infinity;
   const length = Math.hypot(dx, dy) || 1;
+  const preferredDirection = Math.abs(dx) >= Math.abs(dy)
+    ? (dx >= 0 ? 'right' : 'left')
+    : (dy >= 0 ? 'down' : 'up');
   for (const [direction, data] of Object.entries(directionData)) {
     const projected = frog.position.clone().add(new THREE.Vector3(data.x, 0, data.z)).project(camera);
     const vx = projected.x - origin.x;
     const vy = -(projected.y - origin.y);
     const dot = (vx * dx + vy * dy) / (Math.hypot(vx, vy) * length);
-    if (dot > bestDot) { bestDot = dot; bestDirection = direction; }
+    const isPreferredTie = Math.abs(dot - bestDot) <= 1e-6 && direction === preferredDirection;
+    if (dot > bestDot + 1e-6 || isPreferredTie) { bestDot = dot; bestDirection = direction; }
   }
   return bestDirection;
 }
@@ -1097,7 +1047,7 @@ function animate() {
   positionName(playerName, frog, state.currentScale, state.palette === 4 ? 1.65 : 1.35);
   aiFrogs.forEach((ai) => positionName(ai.label, ai.root, ai.currentScale));
   renderer.render(scene, camera);
-  if (firstFrame && customModelReady) {
+  if (firstFrame && customModelReady && groundReady) {
     firstFrame = false;
     ui.loading.classList.add('done');
     setTimeout(() => ui.loading.remove(), 450);
