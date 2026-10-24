@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const GRID_SIZE = 40;
 const TILE = 1.04;
@@ -48,6 +49,9 @@ sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 45 });
 sun.shadow.bias = -0.001;
 scene.add(sun, sun.target);
+const frogRimLight = new THREE.DirectionalLight('#dfffbf', 1.35);
+frogRimLight.position.set(-5, 7, -4);
+scene.add(frogRimLight, frogRimLight.target);
 
 const world = new THREE.Group();
 scene.add(world);
@@ -398,6 +402,10 @@ for (const side of [-1, 1]) {
 }
 scary.visible = false;
 frogVisual.add(scary);
+const placeholderParts = frogVisual.children.filter((child) => child !== crown && child !== scary);
+let customModelReady = false;
+let playerCustomMaterial = null;
+const customPaletteTints = ['#ffffff', '#79a875', '#ef8980', '#c28be0', '#3b403b'];
 
 function makeShadow() {
   const shadow = new THREE.Mesh(
@@ -504,6 +512,10 @@ function updatePlayerPalette() {
   const palette = palettes[nextPalette];
   frogSkinMaterials.forEach((material, index) => material.color.set(palette.colors[index]));
   const blackForm = nextPalette === palettes.length - 1;
+  if (playerCustomMaterial) {
+    playerCustomMaterial.color.set(customPaletteTints[nextPalette]);
+    playerCustomMaterial.emissive.set(blackForm ? '#101510' : '#142008');
+  }
   crown.visible = blackForm;
   scary.visible = blackForm;
   eyeWhite.color.set(blackForm ? '#e74736' : '#edf2c5');
@@ -669,6 +681,61 @@ for (let i = 0; i < 7; i++) {
   aiFrogs.push(ai);
   spawnAi(ai, true);
 }
+
+const MODEL_FORWARD_OFFSET = Math.PI / 2;
+function enhanceFrogMaterial(source) {
+  const material = source.clone();
+  material.metalness = .04;
+  material.roughness = .72;
+  material.envMapIntensity = 1.1;
+  material.emissive.set('#142008');
+  material.emissiveIntensity = .11;
+  if (material.normalMap) material.normalScale.set(.45, .45);
+  if (material.map) material.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  material.needsUpdate = true;
+  return material;
+}
+new GLTFLoader().load('/models/Verdant_Frog_Guardian.glb', (gltf) => {
+  const model = gltf.scene;
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(model);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const normalize = 1.18 / size.x;
+  model.scale.setScalar(normalize);
+  model.position.set(-center.x * normalize, -bounds.min.y * normalize, -center.z * normalize);
+  model.traverse((object) => {
+    if (!object.isMesh) return;
+    object.material = enhanceFrogMaterial(object.material);
+    object.castShadow = true;
+    object.receiveShadow = true;
+  });
+  const container = new THREE.Group();
+  container.name = 'VerdantFrogGuardian';
+  container.rotation.y = MODEL_FORWARD_OFFSET;
+  container.add(model);
+  placeholderParts.forEach((part) => frogVisual.remove(part));
+  frogVisual.add(container);
+  playerCustomMaterial = model.children.find((child) => child.isMesh)?.material || null;
+  model.traverse((object) => { if (object.isMesh && !playerCustomMaterial) playerCustomMaterial = object.material; });
+
+  aiFrogs.forEach((ai, index) => {
+    ai.visual.clear();
+    const rivalModel = container.clone(true);
+    rivalModel.traverse((object) => {
+      if (!object.isMesh) return;
+      object.material = enhanceFrogMaterial(object.material);
+      object.material.color.set(aiColors[index]).lerp(new THREE.Color('#ffffff'), .48);
+      object.castShadow = false;
+    });
+    ai.visual.add(rivalModel);
+  });
+  customModelReady = true;
+  updatePlayerPalette();
+}, undefined, () => {
+  // The complete procedural frog remains as an offline fallback.
+  customModelReady = true;
+});
 
 function updateAi(ai, dt) {
   if (!ai.alive) return;
@@ -1019,6 +1086,9 @@ function animate() {
   sun.position.copy(cameraFocus).add(new THREE.Vector3(9, 18, 7));
   sun.target.position.copy(cameraFocus);
   sun.target.updateMatrixWorld();
+  frogRimLight.position.copy(frog.position).add(new THREE.Vector3(-5, 7, -4));
+  frogRimLight.target.position.copy(frog.position);
+  frogRimLight.target.updateMatrixWorld();
   const cooling = Boolean(state.jump) || state.gameTime < state.nextHop;
   const boosted = state.gameTime < state.boostUntil;
   ui.ready.classList.toggle('cooling', cooling && !boosted);
@@ -1027,7 +1097,7 @@ function animate() {
   positionName(playerName, frog, state.currentScale, state.palette === 4 ? 1.65 : 1.35);
   aiFrogs.forEach((ai) => positionName(ai.label, ai.root, ai.currentScale));
   renderer.render(scene, camera);
-  if (firstFrame) {
+  if (firstFrame && customModelReady) {
     firstFrame = false;
     ui.loading.classList.add('done');
     setTimeout(() => ui.loading.remove(), 450);
@@ -1041,7 +1111,7 @@ window.__frogGame = {
     x: state.x, z: state.z, score: state.score, growth: state.growth, palette: palettes[state.palette].name,
     size: state.currentScale, targetSize: state.targetScale, zoom: state.zoom, paused: state.paused,
     frogsEaten: state.frogsEaten, livingRivals: aiFrogs.filter((ai) => ai.alive).length,
-    boostRemaining: Math.max(0, state.boostUntil - state.gameTime), boosterActive: Boolean(booster),
+    boostRemaining: Math.max(0, state.boostUntil - state.gameTime), boosterActive: Boolean(booster), customModelReady,
     pan: { x: panOffset.x, z: panOffset.z },
   }),
   hop: requestHop,
