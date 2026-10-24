@@ -30,40 +30,9 @@
         </div>
       </header>
 
-      <section class="hud" aria-label="Game progress">
-        <div class="score-block">
-          <span class="hud-label">INSECTS EATEN</span>
-          <div class="score-line"><span id="score">0</span><span class="score-total">/ 1,600</span></div>
-        </div>
-        <div class="size-block">
-          <span class="hud-label">FROG SIZE</span>
-          <strong id="size-label">55%</strong>
-        </div>
-        <div class="growth-row">
-          <div class="growth-copy"><span id="growth-label">Next growth</span><strong><span id="growth-count">0</span>/10</strong></div>
-          <div class="growth-track" role="progressbar" aria-label="Progress to next growth" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0" id="growth-progress">
-            <div id="growth-fill"></div>
-          </div>
-        </div>
-      </section>
-
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="ready-indicator" class="ready-indicator"><span></span> READY TO HOP</div>
-      <div id="hint" class="hint">Hop onto a tile to eat its insect</div>
-
-      <section class="controls" aria-label="Frog movement controls">
-        <div class="control-copy">
-          <span>ONE HOP EVERY SECOND</span>
-          <small>Arrow keys / WASD / swipe</small>
-        </div>
-        <div class="dpad">
-          <button class="move-button up" type="button" data-direction="up" aria-label="Hop up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg></button>
-          <button class="move-button left" type="button" data-direction="left" aria-label="Hop left"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
-          <div class="dpad-center" aria-hidden="true"><span></span></div>
-          <button class="move-button right" type="button" data-direction="right" aria-label="Hop right"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
-          <button class="move-button down" type="button" data-direction="down" aria-label="Hop down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 10 6 6 6-6"/></svg></button>
-        </div>
-      </section>
+      <div id="hint" class="hint">Swipe to hop · Pinch to zoom</div>
 
       <div id="pause-overlay" class="pause-overlay" hidden>
         <div class="pause-card" role="dialog" aria-modal="true" aria-labelledby="pause-title">

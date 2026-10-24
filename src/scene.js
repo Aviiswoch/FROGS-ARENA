@@ -2,20 +2,14 @@ import * as THREE from 'three';
 
 const GRID_SIZE = 40;
 const TILE = 1.04;
+const MAX_INSECTS = GRID_SIZE * GRID_SIZE;
 const HOP_COOLDOWN = 1;
 const HOP_DURATION = 0.68;
 const BASE_SCALE = 0.55;
-const MAX_INSECTS = GRID_SIZE * GRID_SIZE;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const ui = {
   scene: document.querySelector('#scene'),
-  score: document.querySelector('#score'),
-  size: document.querySelector('#size-label'),
-  growthCount: document.querySelector('#growth-count'),
-  growthFill: document.querySelector('#growth-fill'),
-  growthProgress: document.querySelector('#growth-progress'),
-  growthLabel: document.querySelector('#growth-label'),
   toast: document.querySelector('#toast'),
   hint: document.querySelector('#hint'),
   ready: document.querySelector('#ready-indicator'),
@@ -23,14 +17,12 @@ const ui = {
   pauseButton: document.querySelector('#pause-btn'),
   pauseOverlay: document.querySelector('#pause-overlay'),
   soundButton: document.querySelector('#sound-btn'),
-  moveButtons: [...document.querySelectorAll('.move-button')],
 };
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#78a957');
-scene.fog = new THREE.Fog('#78a957', 16, 34);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+scene.fog = new THREE.Fog('#78a957', 16, 36);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
@@ -49,37 +41,39 @@ const sun = new THREE.DirectionalLight('#fff3c4', 3.2);
 sun.position.set(9, 18, 7);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -7;
-sun.shadow.camera.right = 7;
-sun.shadow.camera.top = 7;
-sun.shadow.camera.bottom = -7;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 45;
+Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 45 });
 sun.shadow.bias = -0.001;
-scene.add(sun);
-scene.add(sun.target);
+scene.add(sun, sun.target);
 
 const world = new THREE.Group();
 scene.add(world);
-
-const tileGeometry = new THREE.BoxGeometry(TILE - 0.025, 0.16, TILE - 0.025);
-const tileMaterial = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
-const tiles = new THREE.InstancedMesh(tileGeometry, tileMaterial, MAX_INSECTS);
-tiles.receiveShadow = true;
 const dummy = new THREE.Object3D();
-const lightGrass = new THREE.Color('#82b94f');
-const darkGrass = new THREE.Color('#72a845');
+let seed = 7241;
+const random = () => {
+  seed = (seed * 16807) % 2147483647;
+  return (seed - 1) / 2147483646;
+};
+const clamp = THREE.MathUtils.clamp;
+
+// Flush tile tops preserve the checker pattern without artificial boundary lines.
+const tiles = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(TILE + 0.006, 0.18, TILE + 0.006),
+  new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true }),
+  MAX_INSECTS,
+);
+tiles.receiveShadow = true;
+const lightGrass = new THREE.Color('#83b94f');
+const darkGrass = new THREE.Color('#70a443');
 let tileIndex = 0;
 for (let z = 0; z < GRID_SIZE; z++) {
   for (let x = 0; x < GRID_SIZE; x++) {
-    dummy.position.set(x * TILE, -0.09, z * TILE);
+    dummy.position.set(x * TILE, -0.1, z * TILE);
     dummy.rotation.set(0, 0, 0);
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     tiles.setMatrixAt(tileIndex, dummy.matrix);
-    const variation = ((x * 17 + z * 31) % 7) * 0.008;
     const color = ((x + z) % 2 === 0 ? lightGrass : darkGrass).clone();
-    color.offsetHSL(0, 0, variation);
+    color.offsetHSL(0, 0, ((x * 17 + z * 31) % 7) * 0.003);
     tiles.setColorAt(tileIndex, color);
     tileIndex++;
   }
@@ -89,48 +83,43 @@ tiles.instanceColor.needsUpdate = true;
 world.add(tiles);
 
 const earth = new THREE.Mesh(
-  new THREE.BoxGeometry(GRID_SIZE * TILE + 0.3, 0.5, GRID_SIZE * TILE + 0.3),
+  new THREE.BoxGeometry(GRID_SIZE * TILE + 0.25, 0.5, GRID_SIZE * TILE + 0.25),
   new THREE.MeshStandardMaterial({ color: '#527b38', roughness: 1, flatShading: true }),
 );
-earth.position.set((GRID_SIZE - 1) * TILE / 2, -0.4, (GRID_SIZE - 1) * TILE / 2);
+earth.position.set((GRID_SIZE - 1) * TILE / 2, -0.42, (GRID_SIZE - 1) * TILE / 2);
 earth.receiveShadow = true;
 world.add(earth);
 
-// Small angular grass tufts break up the tile surface without hiding the checkerboard.
-const tuftCount = 420;
+// Thousands of angular blades make the tiles read as soft 3D grass rather than flat boxes.
+const tuftCount = 1800;
 const tufts = new THREE.InstancedMesh(
-  new THREE.ConeGeometry(0.055, 0.22, 3),
+  new THREE.ConeGeometry(0.045, 0.2, 3),
   new THREE.MeshStandardMaterial({ color: '#568e3c', roughness: 1, flatShading: true }),
   tuftCount,
 );
-let seed = 7241;
-const random = () => {
-  seed = (seed * 16807) % 2147483647;
-  return (seed - 1) / 2147483646;
-};
 for (let i = 0; i < tuftCount; i++) {
   const x = Math.floor(random() * GRID_SIZE);
   const z = Math.floor(random() * GRID_SIZE);
-  dummy.position.set(x * TILE + (random() - .5) * .65, .1, z * TILE + (random() - .5) * .65);
-  dummy.rotation.set((random() - .5) * .2, random() * Math.PI, (random() - .5) * .25);
-  dummy.scale.setScalar(.65 + random() * .65);
+  dummy.position.set(x * TILE + (random() - .5) * .82, .08, z * TILE + (random() - .5) * .82);
+  dummy.rotation.set((random() - .5) * .2, random() * Math.PI, (random() - .5) * .28);
+  dummy.scale.set(.65 + random() * .65, .55 + random() * .9, .65 + random() * .65);
   dummy.updateMatrix();
   tufts.setMatrixAt(i, dummy.matrix);
 }
 world.add(tufts);
 
-// Every tile owns one low-poly beetle. Three instanced draws render the full population.
+// One instanced beetle per tile; eaten insects are hidden in place.
 const insectBody = new THREE.InstancedMesh(
   new THREE.SphereGeometry(1, 6, 4),
   new THREE.MeshStandardMaterial({ color: '#40342a', roughness: .85, flatShading: true }),
   MAX_INSECTS,
 );
-const insectWingMaterial = new THREE.MeshStandardMaterial({ color: '#d49b3d', roughness: .7, flatShading: true });
-const insectLeftWing = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 5, 3), insectWingMaterial, MAX_INSECTS);
-const insectRightWing = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 5, 3), insectWingMaterial, MAX_INSECTS);
-const insects = [];
+const wingMaterial = new THREE.MeshStandardMaterial({ color: '#d49b3d', roughness: .7, flatShading: true });
+const insectLeftWing = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 5, 3), wingMaterial, MAX_INSECTS);
+const insectRightWing = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 5, 3), wingMaterial, MAX_INSECTS);
 const insectMeshes = [insectBody, insectLeftWing, insectRightWing];
-insectMeshes.forEach((mesh) => { mesh.castShadow = false; mesh.receiveShadow = true; world.add(mesh); });
+const insects = Array.from({ length: MAX_INSECTS }, () => ({ eaten: false }));
+insectMeshes.forEach((mesh) => { mesh.receiveShadow = true; world.add(mesh); });
 
 function setInsectMatrices(index, x, z, angle, visible = true) {
   const s = visible ? 1 : 0;
@@ -149,13 +138,10 @@ function setInsectMatrices(index, x, z, angle, visible = true) {
     insectMeshes[side + 1].setMatrixAt(index, dummy.matrix);
   }
 }
-
 let insectIndex = 0;
 for (let z = 0; z < GRID_SIZE; z++) {
   for (let x = 0; x < GRID_SIZE; x++) {
-    const angle = random() * Math.PI * 2;
-    setInsectMatrices(insectIndex, x * TILE, z * TILE, angle);
-    insects.push({ eaten: false });
+    setInsectMatrices(insectIndex, x * TILE, z * TILE, random() * Math.PI * 2);
     insectIndex++;
   }
 }
@@ -172,8 +158,6 @@ const frogSkin = frogMaterial('#a9d95c');
 const frogLight = frogMaterial('#c5e879');
 const frogDark = frogMaterial('#7cad46');
 const frogSkinMaterials = [frogSkin, frogLight, frogDark];
-const originalColors = frogSkinMaterials.map((mat) => mat.color.clone());
-const grownColors = ['#4f913c', '#72ae4e', '#397632'].map((c) => new THREE.Color(c));
 const eyeWhite = frogMaterial('#edf2c5');
 const pupilMaterial = frogMaterial('#172b1d');
 
@@ -186,12 +170,10 @@ function ellipsoid(material, position, scale, parent = frogVisual) {
   parent.add(mesh);
   return mesh;
 }
-
 ellipsoid(frogSkin, [0, .36, .05], [.43, .32, .5]);
 ellipsoid(frogLight, [0, .31, -.25], [.32, .22, .29]);
 ellipsoid(frogSkin, [0, .5, -.28], [.42, .3, .34]);
 ellipsoid(frogLight, [0, .39, -.52], [.3, .12, .12]);
-// Wide folded hind legs and splayed feet make the silhouette unmistakably frog-like.
 for (const side of [-1, 1]) {
   ellipsoid(frogDark, [side * .39, .25, .24], [.25, .2, .32]);
   const backFoot = ellipsoid(frogSkin, [side * .48, .1, .42], [.23, .075, .17]);
@@ -207,41 +189,69 @@ for (const side of [-1, 1]) {
   ellipsoid(pupilMaterial, [side * .265, .74, -.555], [.047, .065, .025]);
   ellipsoid(eyeWhite, [side * .252, .77, -.578], [.014, .018, .009]);
 }
-// A small smiling mouth, built from a tube rather than a flat texture.
 const smileCurve = new THREE.QuadraticBezierCurve3(
-  new THREE.Vector3(-.17, .42, -.618),
-  new THREE.Vector3(0, .35, -.65),
-  new THREE.Vector3(.17, .42, -.618),
+  new THREE.Vector3(-.17, .42, -.618), new THREE.Vector3(0, .35, -.65), new THREE.Vector3(.17, .42, -.618),
 );
-const smile = new THREE.Mesh(new THREE.TubeGeometry(smileCurve, 8, .012, 4, false), frogDark);
-frogVisual.add(smile);
+frogVisual.add(new THREE.Mesh(new THREE.TubeGeometry(smileCurve, 8, .012, 4, false), frogDark));
 
-const frogShadow = new THREE.Mesh(
-  new THREE.CircleGeometry(.48, 20),
-  new THREE.MeshBasicMaterial({ color: '#1b4828', transparent: true, opacity: .28, depthWrite: false }),
-);
-frogShadow.rotation.x = -Math.PI / 2;
-frogShadow.position.y = .015;
-world.add(frogShadow);
+// The final form adds real geometry, not just a color swap.
+const crown = new THREE.Group();
+const crownMaterial = new THREE.MeshStandardMaterial({ color: '#f2bd3d', metalness: .45, roughness: .35, flatShading: true });
+const crownBand = new THREE.Mesh(new THREE.CylinderGeometry(.29, .31, .14, 8), crownMaterial);
+crownBand.position.y = .02;
+crown.add(crownBand);
+for (let i = 0; i < 5; i++) {
+  const angle = (i / 5) * Math.PI * 2;
+  const spike = new THREE.Mesh(new THREE.ConeGeometry(.09, .3, 4), crownMaterial);
+  spike.position.set(Math.cos(angle) * .23, .2, Math.sin(angle) * .23);
+  crown.add(spike);
+}
+const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(.07), new THREE.MeshStandardMaterial({ color: '#e5483f', emissive: '#7b100c', emissiveIntensity: .5 }));
+jewel.position.set(0, .02, -.3);
+crown.add(jewel);
+crown.position.set(0, 1.01, -.15);
+crown.visible = false;
+frogVisual.add(crown);
 
-const particles = [];
-const particleGeometry = new THREE.IcosahedronGeometry(.045, 0);
-const particleMaterials = ['#e9f6a2', '#d8ef72', '#f2c65e'].map((color) => new THREE.MeshBasicMaterial({ color }));
+const scary = new THREE.Group();
+const hornMaterial = new THREE.MeshStandardMaterial({ color: '#3b1719', roughness: .8, flatShading: true });
+for (const side of [-1, 1]) {
+  const horn = new THREE.Mesh(new THREE.ConeGeometry(.075, .38, 5), hornMaterial);
+  horn.position.set(side * .37, .91, -.2);
+  horn.rotation.z = side * -.48;
+  scary.add(horn);
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(.22, .045, .06), hornMaterial);
+  brow.position.set(side * .25, .81, -.57);
+  brow.rotation.z = side * .35;
+  scary.add(brow);
+}
+scary.visible = false;
+frogVisual.add(scary);
 
+function makeShadow() {
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(.48, 20),
+    new THREE.MeshBasicMaterial({ color: '#173c24', transparent: true, opacity: .26, depthWrite: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = .015;
+  world.add(shadow);
+  return shadow;
+}
+const frogShadow = makeShadow();
+
+const palettes = [
+  { name: 'Green', colors: ['#a9d95c', '#c5e879', '#7cad46'] },
+  { name: 'Dark green', colors: ['#4f913c', '#72ae4e', '#397632'] },
+  { name: 'Red', colors: ['#c94f42', '#ed7a5f', '#8e302e'] },
+  { name: 'Purple', colors: ['#8250a8', '#b87ac8', '#553071'] },
+  { name: 'Crowned shadow', colors: ['#20231f', '#34382e', '#111511'] },
+];
 const state = {
-  x: 20,
-  z: 20,
-  score: 0,
-  stage: 0,
-  gameTime: 0,
-  nextHop: 0,
-  jump: null,
-  queued: null,
-  held: null,
-  paused: false,
-  muted: false,
-  currentScale: BASE_SCALE,
-  targetScale: BASE_SCALE,
+  x: 20, z: 20, score: 0, nextInsectGrowth: 10, growth: 0, palette: 0,
+  gameTime: 0, nextHop: 0, jump: null, queued: null, held: null,
+  paused: false, muted: false, currentScale: BASE_SCALE, targetScale: BASE_SCALE,
+  zoom: 1, frogsEaten: 0,
 };
 frog.position.set(state.x * TILE, 0, state.z * TILE);
 frog.rotation.y = Math.PI;
@@ -260,63 +270,107 @@ function playTone(type) {
     oscillator.connect(gain);
     gain.connect(audioContext.destination);
     oscillator.type = type === 'eat' ? 'sine' : 'triangle';
-    const start = type === 'eat' ? 540 : type === 'grow' ? 260 : 145;
+    const start = type === 'eat' ? 540 : type === 'grow' ? 260 : type === 'frog' ? 100 : 145;
     oscillator.frequency.setValueAtTime(start, now);
-    oscillator.frequency.exponentialRampToValueAtTime(type === 'eat' ? 860 : type === 'grow' ? 620 : 105, now + .12);
+    oscillator.frequency.exponentialRampToValueAtTime(type === 'eat' ? 860 : type === 'grow' ? 620 : type === 'frog' ? 55 : 105, now + .14);
     gain.gain.setValueAtTime(.0001, now);
-    gain.gain.exponentialRampToValueAtTime(type === 'grow' ? .12 : .06, now + .015);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + (type === 'grow' ? .32 : .14));
+    gain.gain.exponentialRampToValueAtTime(type === 'grow' || type === 'frog' ? .11 : .05, now + .015);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + (type === 'grow' ? .32 : .18));
     oscillator.start(now);
-    oscillator.stop(now + (type === 'grow' ? .34 : .16));
-  } catch { /* Sound is optional when Web Audio is unavailable. */ }
+    oscillator.stop(now + .35);
+  } catch { /* Sound is optional. */ }
 }
-
 let toastTimeout;
-function showToast(message, duration = 1500) {
+function showToast(message, duration = 1400) {
   clearTimeout(toastTimeout);
   ui.toast.textContent = message;
   ui.toast.classList.add('show');
   toastTimeout = setTimeout(() => ui.toast.classList.remove('show'), duration);
 }
 
-function updateHud() {
-  ui.score.textContent = state.score.toLocaleString();
-  ui.size.textContent = `${Math.round(55 * Math.pow(1.2, state.stage))}%`;
-  const remaining = state.score % 10;
-  ui.growthCount.textContent = remaining;
-  ui.growthFill.style.width = `${remaining * 10}%`;
-  ui.growthProgress.setAttribute('aria-valuenow', remaining);
-  ui.growthLabel.textContent = state.score === MAX_INSECTS ? 'Meadow cleared!' : 'Next growth';
-}
-
-function burstAt(x, z) {
+const particles = [];
+const particleGeometry = new THREE.IcosahedronGeometry(.045, 0);
+const particleMaterials = ['#e9f6a2', '#d8ef72', '#f2c65e'].map((color) => new THREE.MeshBasicMaterial({ color }));
+function burstAt(x, z, large = false) {
   if (reducedMotion) return;
-  for (let i = 0; i < 9; i++) {
+  const count = large ? 15 : 8;
+  for (let i = 0; i < count; i++) {
     const mesh = new THREE.Mesh(particleGeometry, particleMaterials[i % particleMaterials.length]);
     mesh.position.set(x, .25, z);
+    mesh.scale.setScalar(large ? 1.5 : 1);
     world.add(mesh);
-    const angle = (i / 9) * Math.PI * 2;
-    particles.push({ mesh, vx: Math.cos(angle) * (.5 + random() * .5), vz: Math.sin(angle) * (.5 + random() * .5), vy: .8 + random() * .8, life: .65 });
+    const angle = (i / count) * Math.PI * 2;
+    particles.push({ mesh, vx: Math.cos(angle) * (.5 + random()), vz: Math.sin(angle) * (.5 + random()), vy: .8 + random(), life: .65 });
   }
 }
 
-function eatCurrentTile() {
-  const index = state.z * GRID_SIZE + state.x;
-  if (insects[index].eaten) return;
-  insects[index].eaten = true;
-  setInsectMatrices(index, state.x * TILE, state.z * TILE, 0, false);
-  insectMeshes.forEach((mesh) => { mesh.instanceMatrix.needsUpdate = true; });
-  state.score++;
-  burstAt(state.x * TILE, state.z * TILE);
-  playTone('eat');
-  if (state.score % 10 === 0) {
-    state.stage++;
-    state.targetScale = BASE_SCALE * Math.pow(1.2, state.stage);
-    playTone('grow');
-    showToast(state.stage <= 2 ? `Growth spurt! +20%` : `Still growing! +20%`);
+function updatePlayerPalette() {
+  const nextPalette = Math.min(Math.floor(state.growth / 2), palettes.length - 1);
+  const changed = nextPalette !== state.palette;
+  state.palette = nextPalette;
+  const palette = palettes[nextPalette];
+  frogSkinMaterials.forEach((material, index) => material.color.set(palette.colors[index]));
+  const blackForm = nextPalette === palettes.length - 1;
+  crown.visible = blackForm;
+  scary.visible = blackForm;
+  eyeWhite.color.set(blackForm ? '#e74736' : '#edf2c5');
+  pupilMaterial.color.set(blackForm ? '#fff0a3' : '#172b1d');
+  pupilMaterial.emissive.set(blackForm ? '#b92e20' : '#000000');
+  pupilMaterial.emissiveIntensity = blackForm ? .65 : 0;
+  return changed ? palette.name : null;
+}
+
+function growPlayer(kind = 'insects') {
+  state.growth++;
+  state.targetScale *= 1.1;
+  const transformation = updatePlayerPalette();
+  if (transformation) {
+    showToast(transformation === 'Crowned shadow' ? 'Final form · Crowned shadow' : `${transformation} transformation`, 1900);
+  } else {
+    showToast(kind === 'frog' ? 'Smaller frog eaten · +10%' : '+10% growth');
   }
-  if (state.score === MAX_INSECTS) showToast('You cleared the whole meadow!', 4000);
-  updateHud();
+  playTone(kind === 'frog' ? 'frog' : 'grow');
+}
+
+// Consume every insect whose square intersects the frog's circular footprint.
+function consumeInsectsAround(gridX, gridZ, scale, owner) {
+  const worldX = gridX * TILE;
+  const worldZ = gridZ * TILE;
+  const radius = scale * .55;
+  const reach = Math.ceil(radius / TILE) + 1;
+  let eatenNow = 0;
+  for (let z = Math.max(0, gridZ - reach); z <= Math.min(GRID_SIZE - 1, gridZ + reach); z++) {
+    for (let x = Math.max(0, gridX - reach); x <= Math.min(GRID_SIZE - 1, gridX + reach); x++) {
+      const index = z * GRID_SIZE + x;
+      if (insects[index].eaten) continue;
+      const centerX = x * TILE;
+      const centerZ = z * TILE;
+      const nearestX = clamp(worldX, centerX - TILE / 2, centerX + TILE / 2);
+      const nearestZ = clamp(worldZ, centerZ - TILE / 2, centerZ + TILE / 2);
+      if ((nearestX - worldX) ** 2 + (nearestZ - worldZ) ** 2 > radius ** 2) continue;
+      insects[index].eaten = true;
+      setInsectMatrices(index, centerX, centerZ, 0, false);
+      eatenNow++;
+    }
+  }
+  if (!eatenNow) return 0;
+  insectMeshes.forEach((mesh) => { mesh.instanceMatrix.needsUpdate = true; });
+  owner.score += eatenNow;
+  burstAt(worldX, worldZ, eatenNow > 3);
+  if (owner === state) {
+    playTone('eat');
+    while (state.score >= state.nextInsectGrowth) {
+      state.nextInsectGrowth += 10;
+      growPlayer('insects');
+    }
+    if (state.score === MAX_INSECTS) showToast('The whole meadow is yours!', 3500);
+  } else {
+    while (owner.score >= owner.nextInsectGrowth) {
+      owner.nextInsectGrowth += 10;
+      owner.targetScale *= 1.1;
+    }
+  }
+  return eatenNow;
 }
 
 const directionData = {
@@ -336,31 +390,129 @@ function tryHop(direction) {
   const nextX = state.x + data.x;
   const nextZ = state.z + data.z;
   if (nextX < 0 || nextX >= GRID_SIZE || nextZ < 0 || nextZ >= GRID_SIZE) {
-    showToast('The meadow ends here', 850);
+    showToast('The meadow ends here', 800);
     state.nextHop = state.gameTime + .25;
     return false;
   }
-  state.jump = {
-    fromX: state.x * TILE,
-    fromZ: state.z * TILE,
-    toX: nextX * TILE,
-    toZ: nextZ * TILE,
-    start: state.gameTime,
-    direction,
-  };
+  state.jump = { fromX: state.x * TILE, fromZ: state.z * TILE, toX: nextX * TILE, toZ: nextZ * TILE, start: state.gameTime };
   state.x = nextX;
   state.z = nextZ;
   state.nextHop = state.gameTime + HOP_COOLDOWN;
   state.queued = null;
   frog.rotation.y = data.rotation;
-  ui.hint.classList.add('hidden');
   playTone('hop');
   return true;
 }
-
 function requestHop(direction) {
-  if (state.paused) return;
-  tryHop(direction);
+  if (!state.paused) tryHop(direction);
+}
+
+// Rival frogs use the same detailed model with independent materials and AI state.
+const aiFrogs = [];
+const aiColors = ['#8fc94f', '#c0d75d', '#69aa48', '#a4c94a', '#7dbb56', '#b3cf62', '#6da54d'];
+function randomAiTile() {
+  let x, z;
+  do {
+    x = Math.floor(random() * GRID_SIZE);
+    z = Math.floor(random() * GRID_SIZE);
+  } while (Math.hypot(x - state.x, z - state.z) < 6);
+  return { x, z };
+}
+function spawnAi(ai, initial = false) {
+  const tile = randomAiTile();
+  ai.x = tile.x;
+  ai.z = tile.z;
+  ai.root.position.set(tile.x * TILE, 0, tile.z * TILE);
+  ai.root.visible = true;
+  ai.shadow.visible = true;
+  ai.alive = true;
+  ai.jump = null;
+  ai.nextHop = state.gameTime + (initial ? random() * 2 : 1);
+  ai.respawnAt = 0;
+}
+for (let i = 0; i < 7; i++) {
+  const root = frog.clone(true);
+  const skinClones = [];
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    const original = object.material;
+    object.material = original.clone();
+    object.castShadow = false;
+    const skinIndex = frogSkinMaterials.indexOf(original);
+    if (skinIndex >= 0) {
+      object.material.color.set(aiColors[i]);
+      if (skinIndex === 2) object.material.color.multiplyScalar(.72);
+      if (skinIndex === 1) object.material.color.offsetHSL(0, 0, .08);
+      skinClones.push(object.material);
+    }
+  });
+  // Rivals never inherit the player's final-form accessories.
+  root.traverse((object) => {
+    if (object.geometry?.type === 'ConeGeometry' && object.position.y > .8) object.visible = false;
+  });
+  const visual = root.children[0];
+  visual.scale.setScalar(1);
+  world.add(root);
+  const shadow = makeShadow();
+  const ai = {
+    root, visual, shadow, skinClones, x: 0, z: 0, alive: true, jump: null,
+    currentScale: .34 + i * .035, targetScale: .34 + i * .035,
+    score: 0, nextInsectGrowth: 10, nextHop: 0, respawnAt: 0,
+  };
+  visual.scale.setScalar(ai.currentScale);
+  aiFrogs.push(ai);
+  spawnAi(ai, true);
+}
+
+function updateAi(ai, dt) {
+  if (!ai.alive) {
+    if (state.gameTime >= ai.respawnAt) spawnAi(ai);
+    return;
+  }
+  if (!ai.jump && state.gameTime >= ai.nextHop) {
+    const options = Object.entries(directionData).filter(([, d]) => ai.x + d.x >= 0 && ai.x + d.x < GRID_SIZE && ai.z + d.z >= 0 && ai.z + d.z < GRID_SIZE);
+    const [direction, data] = options[Math.floor(random() * options.length)];
+    const nextX = ai.x + data.x;
+    const nextZ = ai.z + data.z;
+    ai.jump = { fromX: ai.x * TILE, fromZ: ai.z * TILE, toX: nextX * TILE, toZ: nextZ * TILE, start: state.gameTime };
+    ai.x = nextX;
+    ai.z = nextZ;
+    ai.root.rotation.y = data.rotation;
+    ai.nextHop = state.gameTime + 1.25 + random() * 1.4;
+  }
+  if (ai.jump) {
+    const t = Math.min((state.gameTime - ai.jump.start) / HOP_DURATION, 1);
+    const eased = t * t * (3 - 2 * t);
+    ai.root.position.x = THREE.MathUtils.lerp(ai.jump.fromX, ai.jump.toX, eased);
+    ai.root.position.z = THREE.MathUtils.lerp(ai.jump.fromZ, ai.jump.toZ, eased);
+    ai.root.position.y = reducedMotion ? 0 : Math.sin(t * Math.PI) * .55;
+    if (t >= 1) {
+      ai.root.position.set(ai.jump.toX, 0, ai.jump.toZ);
+      ai.jump = null;
+      consumeInsectsAround(ai.x, ai.z, ai.currentScale, ai);
+    }
+  }
+  ai.currentScale = THREE.MathUtils.damp(ai.currentScale, ai.targetScale, 5, dt);
+  ai.visual.scale.setScalar(ai.currentScale);
+  ai.shadow.position.set(ai.root.position.x, .015, ai.root.position.z);
+  ai.shadow.scale.setScalar(ai.currentScale / BASE_SCALE * (1 - ai.root.position.y * .3));
+}
+
+function eatRival(ai) {
+  ai.alive = false;
+  ai.root.visible = false;
+  ai.shadow.visible = false;
+  ai.respawnAt = state.gameTime + 18;
+  state.frogsEaten++;
+  burstAt(ai.root.position.x, ai.root.position.z, true);
+  growPlayer('frog');
+}
+function checkRivalCollisions() {
+  for (const ai of aiFrogs) {
+    if (!ai.alive || state.currentScale < ai.currentScale * 1.04) continue;
+    const distance = Math.hypot(frog.position.x - ai.root.position.x, frog.position.z - ai.root.position.z);
+    if (distance < (state.currentScale + ai.currentScale) * .43) eatRival(ai);
+  }
 }
 
 function setPaused(paused) {
@@ -373,7 +525,6 @@ function setPaused(paused) {
   if (paused) document.querySelector('#resume-btn').focus();
   else ui.pauseButton.focus();
 }
-
 ui.pauseButton.addEventListener('click', () => setPaused(!state.paused));
 document.querySelector('#resume-btn').addEventListener('click', () => setPaused(false));
 document.querySelector('#restart-btn').addEventListener('click', () => window.location.reload());
@@ -384,61 +535,85 @@ ui.soundButton.addEventListener('click', () => {
   if (!state.muted) playTone('eat');
 });
 
-ui.moveButtons.forEach((button) => {
-  const direction = button.dataset.direction;
-  button.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    button.setPointerCapture(event.pointerId);
-    state.held = direction;
-    button.classList.add('pressed');
-    requestHop(direction);
-  });
-  const release = () => {
-    if (state.held === direction) state.held = null;
-    button.classList.remove('pressed');
-  };
-  button.addEventListener('pointerup', release);
-  button.addEventListener('pointercancel', release);
-  button.addEventListener('lostpointercapture', release);
-});
-
-const keyDirections = {
-  ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down',
-  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-};
-window.addEventListener('keydown', (event) => {
-  if (event.code === 'KeyP' || event.code === 'Escape') {
-    event.preventDefault();
-    setPaused(!state.paused);
-    return;
+// Convert vertical/horizontal gestures to the closest axis on the tilted ground.
+function directionFromSwipe(dx, dy) {
+  const origin = frog.position.clone().project(camera);
+  let bestDirection = 'up';
+  let bestDot = -Infinity;
+  const length = Math.hypot(dx, dy) || 1;
+  for (const [direction, data] of Object.entries(directionData)) {
+    const projected = frog.position.clone().add(new THREE.Vector3(data.x, 0, data.z)).project(camera);
+    const vx = projected.x - origin.x;
+    const vy = -(projected.y - origin.y);
+    const dot = (vx * dx + vy * dy) / (Math.hypot(vx, vy) * length);
+    if (dot > bestDot) { bestDot = dot; bestDirection = direction; }
   }
-  const direction = keyDirections[event.code];
-  if (!direction) return;
+  return bestDirection;
+}
+const keySwipes = { ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'KeyP' || event.code === 'Escape') { event.preventDefault(); setPaused(!state.paused); return; }
+  const swipe = keySwipes[event.code];
+  if (!swipe) return;
   event.preventDefault();
+  const direction = directionFromSwipe(...swipe);
   state.held = direction;
   requestHop(direction);
 });
 window.addEventListener('keyup', (event) => {
-  if (keyDirections[event.code] === state.held) state.held = null;
+  const swipe = keySwipes[event.code];
+  if (swipe && directionFromSwipe(...swipe) === state.held) state.held = null;
 });
 
+function setZoom(value) {
+  state.zoom = clamp(value, .65, 3);
+  camera.zoom = state.zoom;
+  camera.updateProjectionMatrix();
+}
+const pointers = new Map();
 let swipeStart = null;
+let pinchStart = null;
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  swipeStart = { x: event.clientX, y: event.clientY };
+  renderer.domElement.setPointerCapture(event.pointerId);
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size === 1) swipeStart = { x: event.clientX, y: event.clientY };
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchStart = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: state.zoom };
+    swipeStart = null;
+  }
 });
-renderer.domElement.addEventListener('pointerup', (event) => {
-  if (!swipeStart) return;
-  const dx = event.clientX - swipeStart.x;
-  const dy = event.clientY - swipeStart.y;
-  swipeStart = null;
-  if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
-  requestHop(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+renderer.domElement.addEventListener('pointermove', (event) => {
+  if (!pointers.has(event.pointerId)) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size === 2 && pinchStart) {
+    const [a, b] = [...pointers.values()];
+    const distance = Math.hypot(a.x - b.x, a.y - b.y);
+    if (distance > 5 && pinchStart.distance > 5) setZoom(pinchStart.zoom * distance / pinchStart.distance);
+  }
 });
-renderer.domElement.addEventListener('pointercancel', () => { swipeStart = null; });
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && !state.paused) setPaused(true);
-});
+function endPointer(event) {
+  const wasPinching = Boolean(pinchStart);
+  pointers.delete(event.pointerId);
+  if (wasPinching) {
+    if (pointers.size < 2) pinchStart = null;
+    swipeStart = null;
+    return;
+  }
+  if (swipeStart && pointers.size === 0) {
+    const dx = event.clientX - swipeStart.x;
+    const dy = event.clientY - swipeStart.y;
+    swipeStart = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) >= 24) requestHop(directionFromSwipe(dx, dy));
+  }
+}
+renderer.domElement.addEventListener('pointerup', endPointer);
+renderer.domElement.addEventListener('pointercancel', endPointer);
+renderer.domElement.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  setZoom(state.zoom * Math.exp(-event.deltaY * .001));
+}, { passive: false });
+document.addEventListener('visibilitychange', () => { if (document.hidden && !state.paused) setPaused(true); });
 
 function resize() {
   const width = ui.scene.clientWidth;
@@ -457,21 +632,17 @@ resize();
 
 const clock = new THREE.Clock();
 const targetFocus = new THREE.Vector3();
-const colorScratch = new THREE.Color();
 let firstFrame = true;
-
+let hintChanged = false;
 function animate() {
   const rawDt = clock.getDelta();
   const dt = Math.min(rawDt, .05);
   if (!state.paused) {
-    // Keep the one-second rule tied to real time even on slower phones.
     state.gameTime += rawDt;
-
     if (!state.jump && state.gameTime >= state.nextHop) {
       const nextDirection = state.queued || state.held;
       if (nextDirection) tryHop(nextDirection);
     }
-
     if (state.jump) {
       const jump = state.jump;
       const t = Math.min((state.gameTime - jump.start) / HOP_DURATION, 1);
@@ -484,23 +655,21 @@ function animate() {
       if (t >= 1) {
         frog.position.set(jump.toX, 0, jump.toZ);
         state.jump = null;
-        eatCurrentTile();
+        consumeInsectsAround(state.x, state.z, state.currentScale, state);
+        if (!hintChanged) {
+          hintChanged = true;
+          ui.hint.textContent = 'Eat smaller frogs · Pinch to zoom';
+          setTimeout(() => ui.hint.classList.add('hidden'), 6000);
+        }
       }
     }
-
     state.currentScale = THREE.MathUtils.damp(state.currentScale, state.targetScale, 6, rawDt);
     if (!state.jump) frogVisual.scale.setScalar(state.currentScale);
-    const colorAmount = Math.min(state.stage / 3, 1);
-    frogSkinMaterials.forEach((material, index) => {
-      colorScratch.copy(originalColors[index]).lerp(grownColors[index], colorAmount);
-      material.color.copy(colorScratch);
-    });
-
-    frogShadow.position.x = frog.position.x;
-    frogShadow.position.z = frog.position.z;
-    const shadowScale = state.currentScale * (1 - frog.position.y * .35);
-    frogShadow.scale.setScalar(shadowScale / BASE_SCALE);
-    frogShadow.material.opacity = .28 - frog.position.y * .14;
+    frogShadow.position.set(frog.position.x, .015, frog.position.z);
+    frogShadow.scale.setScalar(state.currentScale / BASE_SCALE * (1 - frog.position.y * .35));
+    frogShadow.material.opacity = .26 - frog.position.y * .12;
+    aiFrogs.forEach((ai) => updateAi(ai, rawDt));
+    checkRivalCollisions();
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const particle = particles[i];
@@ -511,13 +680,9 @@ function animate() {
       particle.mesh.position.z += particle.vz * dt;
       particle.mesh.rotation.x += dt * 5;
       particle.mesh.scale.setScalar(Math.max(0, particle.life / .65));
-      if (particle.life <= 0) {
-        world.remove(particle.mesh);
-        particles.splice(i, 1);
-      }
+      if (particle.life <= 0) { world.remove(particle.mesh); particles.splice(i, 1); }
     }
   }
-
   targetFocus.set(frog.position.x, .15, frog.position.z);
   cameraFocus.lerp(targetFocus, 1 - Math.exp(-rawDt * 5));
   camera.position.copy(cameraFocus).add(cameraOffset);
@@ -525,11 +690,9 @@ function animate() {
   sun.position.copy(cameraFocus).add(new THREE.Vector3(9, 18, 7));
   sun.target.position.copy(cameraFocus);
   sun.target.updateMatrixWorld();
-
   const cooling = Boolean(state.jump) || state.gameTime < state.nextHop;
   ui.ready.classList.toggle('cooling', cooling);
   ui.ready.lastChild.textContent = cooling ? ' RECHARGING' : ' READY TO HOP';
-
   renderer.render(scene, camera);
   if (firstFrame) {
     firstFrame = false;
@@ -538,12 +701,15 @@ function animate() {
     window.__SCENE_READY__ = true;
   }
 }
-
-updateHud();
 renderer.setAnimationLoop(animate);
 
-// Small read-only-friendly hook for automated smoke tests and keyboard-free debugging.
 window.__frogGame = {
-  getState: () => ({ x: state.x, z: state.z, score: state.score, stage: state.stage, size: state.currentScale, paused: state.paused }),
+  getState: () => ({
+    x: state.x, z: state.z, score: state.score, growth: state.growth, palette: palettes[state.palette].name,
+    size: state.currentScale, targetSize: state.targetScale, zoom: state.zoom, paused: state.paused,
+    frogsEaten: state.frogsEaten, livingRivals: aiFrogs.filter((ai) => ai.alive).length,
+  }),
   hop: requestHop,
+  swipe: (dx, dy) => requestHop(directionFromSwipe(dx, dy)),
+  zoom: setZoom,
 };
