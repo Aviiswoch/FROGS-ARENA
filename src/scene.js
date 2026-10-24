@@ -6,6 +6,7 @@ const MAX_INSECTS = GRID_SIZE * GRID_SIZE;
 const HOP_COOLDOWN = 1;
 const HOP_DURATION = 0.68;
 const BASE_SCALE = 0.55;
+const MAX_FROG_SCALE = 12;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const ui = {
@@ -17,7 +18,10 @@ const ui = {
   pauseButton: document.querySelector('#pause-btn'),
   pauseOverlay: document.querySelector('#pause-overlay'),
   soundButton: document.querySelector('#sound-btn'),
+  nameLayer: document.querySelector('#name-layer'),
+  winnerOverlay: document.querySelector('#winner-overlay'),
 };
+document.querySelector('#winner-restart-btn').addEventListener('click', () => window.location.reload());
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#78a957');
@@ -90,23 +94,190 @@ earth.position.set((GRID_SIZE - 1) * TILE / 2, -0.42, (GRID_SIZE - 1) * TILE / 2
 earth.receiveShadow = true;
 world.add(earth);
 
-// Thousands of angular blades make the tiles read as soft 3D grass rather than flat boxes.
-const tuftCount = 1800;
+// Each tuft contains four bent, tapered 3D blades rather than a flat grass texture.
+function createGrassTuftGeometry() {
+  const positions = [];
+  for (let blade = 0; blade < 4; blade++) {
+    const angle = blade * Math.PI / 2 + .35;
+    const right = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+    const lean = new THREE.Vector3(Math.sin(angle) * .09, 0, Math.cos(angle) * .09);
+    const baseLeft = right.clone().multiplyScalar(-.035);
+    const baseRight = right.clone().multiplyScalar(.035);
+    const midLeft = right.clone().multiplyScalar(-.026).add(new THREE.Vector3(0, .16, 0)).addScaledVector(lean, .35);
+    const midRight = right.clone().multiplyScalar(.026).add(new THREE.Vector3(0, .16, 0)).addScaledVector(lean, .35);
+    const tip = new THREE.Vector3(0, .34 + blade * .018, 0).add(lean);
+    for (const point of [baseLeft, baseRight, midRight, baseLeft, midRight, midLeft, midLeft, midRight, tip]) positions.push(point.x, point.y, point.z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+const tuftCount = 4800;
 const tufts = new THREE.InstancedMesh(
-  new THREE.ConeGeometry(0.045, 0.2, 3),
-  new THREE.MeshStandardMaterial({ color: '#568e3c', roughness: 1, flatShading: true }),
+  createGrassTuftGeometry(),
+  new THREE.MeshStandardMaterial({ color: '#568e3c', roughness: .95, flatShading: true, side: THREE.DoubleSide }),
   tuftCount,
 );
 for (let i = 0; i < tuftCount; i++) {
   const x = Math.floor(random() * GRID_SIZE);
   const z = Math.floor(random() * GRID_SIZE);
-  dummy.position.set(x * TILE + (random() - .5) * .82, .08, z * TILE + (random() - .5) * .82);
-  dummy.rotation.set((random() - .5) * .2, random() * Math.PI, (random() - .5) * .28);
-  dummy.scale.set(.65 + random() * .65, .55 + random() * .9, .65 + random() * .65);
+  dummy.position.set(x * TILE + (random() - .5) * .9, 0, z * TILE + (random() - .5) * .9);
+  dummy.rotation.set((random() - .5) * .08, random() * Math.PI, (random() - .5) * .08);
+  dummy.scale.set(.65 + random() * .65, .45 + random() * .8, .65 + random() * .65);
   dummy.updateMatrix();
   tufts.setMatrixAt(i, dummy.matrix);
+  tufts.setColorAt(i, new THREE.Color((x + z) % 2 ? '#4f8738' : '#639b40'));
 }
+tufts.instanceColor.needsUpdate = true;
 world.add(tufts);
+
+// A low-poly city park: iron fence, sidewalks, four roads, gardens, towers and moving taxis.
+const city = new THREE.Group();
+world.add(city);
+const CITY_CENTER = (GRID_SIZE - 1) * TILE / 2;
+const HALF_ARENA = GRID_SIZE * TILE / 2;
+const cityMaterials = {
+  iron: new THREE.MeshStandardMaterial({ color: '#263c35', roughness: .72, metalness: .35, flatShading: true }),
+  sidewalk: new THREE.MeshStandardMaterial({ color: '#a8aa96', roughness: 1 }),
+  road: new THREE.MeshStandardMaterial({ color: '#3f4747', roughness: 1 }),
+  stripe: new THREE.MeshBasicMaterial({ color: '#e8d786' }),
+  trunk: new THREE.MeshStandardMaterial({ color: '#70513a', roughness: 1, flatShading: true }),
+  leaves: new THREE.MeshStandardMaterial({ color: '#477b43', roughness: 1, flatShading: true }),
+  taxi: new THREE.MeshStandardMaterial({ color: '#edbd32', roughness: .65, flatShading: true }),
+  taxiGlass: new THREE.MeshStandardMaterial({ color: '#8fb6b4', roughness: .35, flatShading: true }),
+  rubber: new THREE.MeshStandardMaterial({ color: '#252b29', roughness: 1 }),
+};
+function cityBox(width, height, depth, material, x, y, z, parent = city) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+  mesh.position.set(x, y, z);
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+cityBox(GRID_SIZE * TILE + 3, .18, GRID_SIZE * TILE + 3, cityMaterials.sidewalk, CITY_CENTER, -.25, CITY_CENTER);
+const roadOffset = HALF_ARENA + 4.2;
+const roadLength = GRID_SIZE * TILE + 24;
+for (const side of [-1, 1]) {
+  cityBox(roadLength, .12, 5.5, cityMaterials.road, CITY_CENTER, -.22, CITY_CENTER + side * roadOffset);
+  cityBox(5.5, .12, roadLength, cityMaterials.road, CITY_CENTER + side * roadOffset, -.22, CITY_CENTER);
+}
+const dashCount = 56;
+const roadDashes = new THREE.InstancedMesh(new THREE.BoxGeometry(.85, .025, .09), cityMaterials.stripe, dashCount);
+for (let i = 0; i < dashCount; i++) {
+  const lane = Math.floor(i / 14);
+  const along = CITY_CENTER - 25 + (i % 14) * 3.85;
+  const vertical = lane >= 2;
+  const side = lane % 2 === 0 ? -1 : 1;
+  dummy.position.set(vertical ? CITY_CENTER + side * roadOffset : along, -.145, vertical ? along : CITY_CENTER + side * roadOffset);
+  dummy.rotation.set(0, vertical ? Math.PI / 2 : 0, 0);
+  dummy.scale.set(1, 1, 1);
+  dummy.updateMatrix();
+  roadDashes.setMatrixAt(i, dummy.matrix);
+}
+city.add(roadDashes);
+const fenceExtent = HALF_ARENA + .7;
+const fencePosts = new THREE.InstancedMesh(new THREE.BoxGeometry(.1, 1.05, .1), cityMaterials.iron, 88);
+let postIndex = 0;
+for (let side = 0; side < 4; side++) {
+  for (let i = 0; i < 22; i++) {
+    const along = CITY_CENTER - HALF_ARENA + i * (GRID_SIZE * TILE / 21);
+    const vertical = side >= 2;
+    const sign = side % 2 === 0 ? -1 : 1;
+    dummy.position.set(vertical ? CITY_CENTER + sign * fenceExtent : along, .45, vertical ? along : CITY_CENTER + sign * fenceExtent);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    fencePosts.setMatrixAt(postIndex++, dummy.matrix);
+  }
+}
+city.add(fencePosts);
+for (const side of [-1, 1]) {
+  for (const height of [.25, .78]) {
+    cityBox(GRID_SIZE * TILE + 1.4, .07, .07, cityMaterials.iron, CITY_CENTER, height, CITY_CENTER + side * fenceExtent);
+    cityBox(.07, .07, GRID_SIZE * TILE + 1.4, cityMaterials.iron, CITY_CENTER + side * fenceExtent, height, CITY_CENTER);
+  }
+}
+const treePositions = [];
+for (let i = 0; i < 36; i++) {
+  const side = i % 4;
+  const along = CITY_CENTER - 23 + Math.floor(i / 4) * 5.7;
+  const sign = side % 2 === 0 ? -1 : 1;
+  const offset = HALF_ARENA + 8.4;
+  treePositions.push(side < 2 ? [along, CITY_CENTER + sign * offset] : [CITY_CENTER + sign * offset, along]);
+}
+const treeTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(.16, .22, 1.5, 6), cityMaterials.trunk, treePositions.length);
+const treeCrowns = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.05, 1), cityMaterials.leaves, treePositions.length);
+treePositions.forEach(([x, z], i) => {
+  dummy.position.set(x, .55, z); dummy.rotation.set(0, random() * Math.PI, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); treeTrunks.setMatrixAt(i, dummy.matrix);
+  dummy.position.set(x, 1.85, z); dummy.scale.set(.8 + random() * .45, .85 + random() * .5, .8 + random() * .45); dummy.updateMatrix(); treeCrowns.setMatrixAt(i, dummy.matrix);
+  treeCrowns.setColorAt(i, new THREE.Color(i % 3 === 0 ? '#5d8c48' : '#3f7540'));
+});
+treeCrowns.instanceColor.needsUpdate = true;
+city.add(treeTrunks, treeCrowns);
+const buildingColors = ['#8b7968', '#77858a', '#9b866d', '#6f787b', '#a0927e'];
+const windowTransforms = [];
+for (let side = 0; side < 4; side++) {
+  for (let i = 0; i < 5; i++) {
+    const along = CITY_CENTER - 22 + i * 11;
+    const sign = side % 2 === 0 ? -1 : 1;
+    const offset = HALF_ARENA + 14 + (i % 2) * 2;
+    const x = side < 2 ? along : CITY_CENTER + sign * offset;
+    const z = side < 2 ? CITY_CENTER + sign * offset : along;
+    const width = 5 + (i % 2);
+    const depth = 5 + ((i + 1) % 2);
+    const height = 6 + ((i * 7 + side * 3) % 11);
+    const material = new THREE.MeshStandardMaterial({ color: buildingColors[(i + side) % buildingColors.length], roughness: .95, flatShading: true });
+    cityBox(width, height, depth, material, x, height / 2 - .2, z);
+    cityBox(width * .55, .5, depth * .55, cityMaterials.sidewalk, x, height + .05, z);
+    if (i % 2 === 0) {
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(.65, .65, 1.2, 8), cityMaterials.trunk);
+      tank.position.set(x, height + .85, z);
+      city.add(tank);
+    }
+    for (let floor = 0; floor < Math.floor(height / 1.5); floor++) {
+      for (let column = -1; column <= 1; column++) {
+        windowTransforms.push({ x, z, y: 1 + floor * 1.45, column, side, width, depth });
+      }
+    }
+  }
+}
+const cityWindows = new THREE.InstancedMesh(new THREE.BoxGeometry(.48, .58, .035), new THREE.MeshBasicMaterial({ color: '#d7d59b' }), windowTransforms.length);
+windowTransforms.forEach((window, i) => {
+  const frontSign = window.side % 2 === 0 ? 1 : -1;
+  if (window.side < 2) {
+    dummy.position.set(window.x + window.column * 1.25, window.y, window.z + frontSign * (window.depth / 2 + .02));
+    dummy.rotation.set(0, 0, 0);
+  } else {
+    dummy.position.set(window.x + frontSign * (window.width / 2 + .02), window.y, window.z + window.column * 1.25);
+    dummy.rotation.set(0, Math.PI / 2, 0);
+  }
+  dummy.scale.set(1, 1, 1); dummy.updateMatrix(); cityWindows.setMatrixAt(i, dummy.matrix);
+});
+city.add(cityWindows);
+const taxis = [];
+for (let i = 0; i < 10; i++) {
+  const group = new THREE.Group();
+  cityBox(.85, .32, 1.55, cityMaterials.taxi, 0, .22, 0, group);
+  cityBox(.68, .3, .78, cityMaterials.taxiGlass, 0, .5, -.05, group);
+  cityBox(.9, .12, .12, cityMaterials.rubber, 0, .17, .73, group);
+  cityBox(.9, .12, .12, cityMaterials.rubber, 0, .17, -.73, group);
+  city.add(group);
+  const vertical = i % 2 === 1;
+  const side = i % 4 < 2 ? -1 : 1;
+  taxis.push({ group, vertical, side, progress: random() * 58 - 29, speed: 1.5 + random() * 1.4 });
+}
+function updateCity(dt) {
+  for (const taxi of taxis) {
+    taxi.progress += dt * taxi.speed * taxi.side;
+    if (taxi.progress > 31) taxi.progress = -31;
+    if (taxi.progress < -31) taxi.progress = 31;
+    const along = CITY_CENTER + taxi.progress;
+    const lane = CITY_CENTER + (taxi.vertical ? taxi.side : -taxi.side) * (roadOffset + 1.25);
+    taxi.group.position.set(taxi.vertical ? lane : along, -.1, taxi.vertical ? along : lane);
+    taxi.group.rotation.y = taxi.vertical ? (taxi.side > 0 ? 0 : Math.PI) : (taxi.side > 0 ? -Math.PI / 2 : Math.PI / 2);
+  }
+}
 
 // One instanced beetle per tile; eaten insects are hidden in place.
 const insectBody = new THREE.InstancedMesh(
@@ -250,7 +421,7 @@ const palettes = [
 const state = {
   x: 20, z: 20, score: 0, nextInsectGrowth: 10, growth: 0, palette: 0,
   gameTime: 0, nextHop: 0, jump: null, queued: null, held: null,
-  paused: false, muted: false, currentScale: BASE_SCALE, targetScale: BASE_SCALE,
+  paused: false, won: false, muted: false, currentScale: BASE_SCALE, targetScale: BASE_SCALE,
   zoom: 1, manualZoom: 1, zoomTarget: 1, frogsEaten: 0,
   boostUntil: 0, boosterCooldown: 0, nextBoosterCheck: 0,
 };
@@ -260,8 +431,26 @@ frog.position.set(state.x * TILE, 0, state.z * TILE);
 frog.rotation.y = Math.PI;
 frogVisual.scale.setScalar(BASE_SCALE);
 frogShadow.position.set(frog.position.x, .015, frog.position.z);
+const playerName = document.createElement('span');
+playerName.className = 'frog-name player';
+playerName.textContent = 'YOU';
+ui.nameLayer.appendChild(playerName);
+const nameVector = new THREE.Vector3();
+function positionName(label, root, scale, crownHeight = 1.35) {
+  nameVector.copy(root.position);
+  nameVector.y += scale * crownHeight + .3;
+  nameVector.project(camera);
+  const x = (nameVector.x * .5 + .5) * ui.scene.clientWidth;
+  const y = (-nameVector.y * .5 + .5) * ui.scene.clientHeight;
+  const visible = root.visible && nameVector.z > -1 && nameVector.z < 1 && x > -30 && x < ui.scene.clientWidth + 30 && y > -20 && y < ui.scene.clientHeight + 20;
+  label.style.display = visible ? '' : 'none';
+  if (visible) label.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+}
 
 let audioContext;
+const distressAudio = new Audio('/audio/frog-distress.mp3');
+distressAudio.preload = 'auto';
+distressAudio.volume = .72;
 function playTone(type) {
   if (state.muted) return;
   try {
@@ -325,11 +514,14 @@ function updatePlayerPalette() {
 }
 
 function growPlayer(kind = 'insects') {
+  if (state.targetScale >= MAX_FROG_SCALE) return;
   state.growth++;
-  state.targetScale *= 1.1;
+  state.targetScale = Math.min(MAX_FROG_SCALE, state.targetScale * 1.1);
   updateAutoZoom();
   const transformation = updatePlayerPalette();
-  if (transformation) {
+  if (state.targetScale === MAX_FROG_SCALE) {
+    showToast('Maximum size · 12 blocks', 1800);
+  } else if (transformation) {
     showToast(transformation === 'Crowned shadow' ? 'Final form · Crowned shadow' : `${transformation} transformation`, 1900);
   } else {
     showToast(kind === 'frog' ? 'Smaller frog eaten · +10%' : '+10% growth');
@@ -419,6 +611,7 @@ function requestHop(direction) {
 // Rival frogs use the same detailed model with independent materials and AI state.
 const aiFrogs = [];
 const aiColors = ['#8fc94f', '#c0d75d', '#69aa48', '#a4c94a', '#7dbb56', '#b3cf62', '#6da54d'];
+const aiNames = ['CROAK', 'HOPPER', 'LILY', 'JUMPY', 'BUBBLES', 'MOSS', 'RIBBIT'];
 function randomAiTile() {
   let x, z;
   do {
@@ -459,12 +652,16 @@ for (let i = 0; i < 7; i++) {
   root.traverse((object) => {
     if (object.geometry?.type === 'ConeGeometry' && object.position.y > .8) object.visible = false;
   });
+  const label = document.createElement('span');
+  label.className = 'frog-name';
+  label.textContent = aiNames[i];
+  ui.nameLayer.appendChild(label);
   const visual = root.children[0];
   visual.scale.setScalar(1);
   world.add(root);
   const shadow = makeShadow();
   const ai = {
-    root, visual, shadow, skinClones, x: 0, z: 0, alive: true, jump: null,
+    root, visual, shadow, label, skinClones, x: 0, z: 0, alive: true, jump: null,
     currentScale: .34 + i * .035, targetScale: .34 + i * .035,
     score: 0, nextInsectGrowth: 10, nextHop: 0, respawnAt: 0,
   };
@@ -474,10 +671,7 @@ for (let i = 0; i < 7; i++) {
 }
 
 function updateAi(ai, dt) {
-  if (!ai.alive) {
-    if (state.gameTime >= ai.respawnAt) spawnAi(ai);
-    return;
-  }
+  if (!ai.alive) return;
   if (!ai.jump && state.gameTime >= ai.nextHop) {
     const options = Object.entries(directionData).filter(([, d]) => ai.x + d.x >= 0 && ai.x + d.x < GRID_SIZE && ai.z + d.z >= 0 && ai.z + d.z < GRID_SIZE);
     const [direction, data] = options[Math.floor(random() * options.length)];
@@ -486,7 +680,8 @@ function updateAi(ai, dt) {
     ai.jump = { fromX: ai.x * TILE, fromZ: ai.z * TILE, toX: nextX * TILE, toZ: nextZ * TILE, start: state.gameTime };
     ai.x = nextX;
     ai.z = nextZ;
-    ai.root.rotation.y = data.rotation;
+    // Local forward is -Z: face the velocity vector before leaving the ground.
+    ai.root.rotation.y = Math.atan2(-data.x, -data.z);
     ai.nextHop = state.gameTime + 1.25 + random() * 1.4;
   }
   if (ai.jump) {
@@ -495,9 +690,11 @@ function updateAi(ai, dt) {
     ai.root.position.x = THREE.MathUtils.lerp(ai.jump.fromX, ai.jump.toX, eased);
     ai.root.position.z = THREE.MathUtils.lerp(ai.jump.fromZ, ai.jump.toZ, eased);
     ai.root.position.y = reducedMotion ? 0 : Math.sin(t * Math.PI) * .55;
+    ai.visual.rotation.x = reducedMotion ? 0 : -Math.sin(t * Math.PI) * .16;
     if (t >= 1) {
       ai.root.position.set(ai.jump.toX, 0, ai.jump.toZ);
       ai.jump = null;
+      ai.visual.rotation.x = 0;
       consumeInsectsAround(ai.x, ai.z, ai.currentScale, ai);
     }
   }
@@ -511,10 +708,22 @@ function eatRival(ai) {
   ai.alive = false;
   ai.root.visible = false;
   ai.shadow.visible = false;
-  ai.respawnAt = state.gameTime + 18;
+  ai.label.style.display = 'none';
   state.frogsEaten++;
   burstAt(ai.root.position.x, ai.root.position.z, true);
+  if (!state.muted) {
+    distressAudio.currentTime = 0;
+    distressAudio.play().catch(() => {});
+  }
   growPlayer('frog');
+  if (aiFrogs.every((rival) => !rival.alive)) {
+    state.won = true;
+    setTimeout(() => {
+      state.paused = true;
+      ui.winnerOverlay.hidden = false;
+      document.querySelector('#winner-restart-btn').focus();
+    }, 650);
+  }
 }
 function checkRivalCollisions() {
   for (const ai of aiFrogs) {
@@ -596,6 +805,7 @@ document.querySelector('#resume-btn').addEventListener('click', () => setPaused(
 document.querySelector('#restart-btn').addEventListener('click', () => window.location.reload());
 ui.soundButton.addEventListener('click', () => {
   state.muted = !state.muted;
+  distressAudio.muted = state.muted;
   ui.soundButton.setAttribute('aria-pressed', state.muted);
   ui.soundButton.setAttribute('aria-label', state.muted ? 'Enable sound' : 'Mute sound');
   if (!state.muted) playTone('eat');
@@ -618,6 +828,7 @@ function directionFromSwipe(dx, dy) {
 }
 const keySwipes = { ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
 window.addEventListener('keydown', (event) => {
+  if (state.won) return;
   if (event.code === 'KeyP' || event.code === 'Escape') { event.preventDefault(); setPaused(!state.paused); return; }
   const swipe = keySwipes[event.code];
   if (!swipe) return;
@@ -650,10 +861,8 @@ function setZoom(value) {
 const pointers = new Map();
 let swipeStart = null;
 let pinchStart = null;
-let pointerStartedAt = 0;
 let panning = false;
-let panMoveCount = 0;
-const panStartOffset = new THREE.Vector3();
+let gestureMode = null;
 function panCamera(dx, dy) {
   const worldPerPixel = (camera.top - camera.bottom) / state.zoom / renderer.domElement.clientHeight;
   const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
@@ -673,10 +882,10 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (pointers.size === 1) {
     swipeStart = { x: event.clientX, y: event.clientY };
-    pointerStartedAt = event.timeStamp;
-    panStartOffset.copy(panOffset);
-    panMoveCount = 0;
-    panning = false;
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const lowerHopZone = event.clientY - bounds.top >= bounds.height * .65;
+    gestureMode = lowerHopZone ? 'hop' : 'pan';
+    panning = !lowerHopZone;
   }
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
@@ -695,11 +904,8 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     if (distance > 5 && pinchStart.distance > 5) setZoom(pinchStart.zoom * distance / pinchStart.distance);
     return;
   }
-  if (pointers.size === 1 && swipeStart) {
-    const totalDistance = Math.hypot(event.clientX - swipeStart.x, event.clientY - swipeStart.y);
-    panMoveCount++;
-    if (!panning && panMoveCount >= 2 && totalDistance > 10 && event.timeStamp - pointerStartedAt > 300) panning = true;
-    if (panning) panCamera(event.clientX - previous.x, event.clientY - previous.y);
+  if (pointers.size === 1 && swipeStart && gestureMode === 'pan') {
+    panCamera(event.clientX - previous.x, event.clientY - previous.y);
   }
 });
 function endPointer(event) {
@@ -715,13 +921,11 @@ function endPointer(event) {
   if (swipeStart && pointers.size === 0) {
     const dx = event.clientX - swipeStart.x;
     const dy = event.clientY - swipeStart.y;
-    const duration = event.timeStamp - pointerStartedAt;
+    const shouldHop = gestureMode === 'hop' && !wasPanning;
     swipeStart = null;
     panning = false;
-    if ((!wasPanning || duration < 500) && Math.max(Math.abs(dx), Math.abs(dy)) >= 24) {
-      if (wasPanning) panOffset.copy(panStartOffset);
-      requestHop(directionFromSwipe(dx, dy));
-    }
+    gestureMode = null;
+    if (shouldHop && Math.max(Math.abs(dx), Math.abs(dy)) >= 24) requestHop(directionFromSwipe(dx, dy));
   }
 }
 renderer.domElement.addEventListener('pointerup', endPointer);
@@ -789,6 +993,7 @@ function animate() {
     aiFrogs.forEach((ai) => updateAi(ai, rawDt));
     checkRivalCollisions();
     updateBooster();
+    updateCity(rawDt);
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const particle = particles[i];
@@ -819,6 +1024,8 @@ function animate() {
   ui.ready.classList.toggle('cooling', cooling && !boosted);
   ui.ready.classList.toggle('boosted', boosted);
   ui.ready.lastChild.textContent = boosted ? ' 2× SPEED' : cooling ? ' RECHARGING' : ' READY TO HOP';
+  positionName(playerName, frog, state.currentScale, state.palette === 4 ? 1.65 : 1.35);
+  aiFrogs.forEach((ai) => positionName(ai.label, ai.root, ai.currentScale));
   renderer.render(scene, camera);
   if (firstFrame) {
     firstFrame = false;

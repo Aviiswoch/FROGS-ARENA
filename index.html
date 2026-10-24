@@ -4,20 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#173f2a" />
-    <meta name="description" content="A tiny low-poly frog. A very big appetite. Hop, hunt, and grow in Frog Feast." />
+    <meta name="description" content="Hop, hunt, and become the last frog standing in a low-poly city park arena." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23173f2a'/%3E%3Ccircle cx='20' cy='20' r='10' fill='%23d8ef72'/%3E%3Ccircle cx='44' cy='20' r='10' fill='%23d8ef72'/%3E%3Cellipse cx='32' cy='37' rx='24' ry='19' fill='%23a9d95c'/%3E%3Ccircle cx='20' cy='20' r='4' fill='%23173f2a'/%3E%3Ccircle cx='44' cy='20' r='4' fill='%23173f2a'/%3E%3Cpath d='M22 40q10 10 20 0' fill='none' stroke='%23173f2a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
-    <title>Frog Feast — Low-poly hopping game</title>
+    <title>Frogs Arena — Low-poly battle game</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <main class="game-shell" aria-label="Frog Feast game">
-      <div id="scene" aria-label="3D grass field with a frog and insects"></div>
+      <div id="scene" aria-label="3D city park arena with battling frogs"></div>
+      <div id="name-layer" aria-hidden="true"></div>
       <div class="vignette" aria-hidden="true"></div>
 
       <header class="topbar">
-        <div class="brand" aria-label="Frog Feast">
-          <span class="brand-frog">FROG</span>
-          <span class="brand-feast">FEAST</span>
+        <div class="brand" aria-label="Frogs Arena">
+          <span class="brand-frog">FROGS</span>
+          <span class="brand-feast">ARENA</span>
         </div>
         <div class="header-actions">
           <button id="sound-btn" class="icon-button" type="button" aria-label="Mute sound" aria-pressed="false">
@@ -32,7 +33,7 @@
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="ready-indicator" class="ready-indicator"><span></span> READY TO HOP</div>
-      <div id="hint" class="hint">Drag to explore · Flick to hop · Pinch to zoom</div>
+      <div id="hint" class="hint">Swipe here to hop · Drag above to explore</div>
 
       <div id="pause-overlay" class="pause-overlay" hidden>
         <div class="pause-card" role="dialog" aria-modal="true" aria-labelledby="pause-title">
@@ -44,7 +45,16 @@
           <button id="restart-btn" class="text-button" type="button">Start a fresh field</button>
         </div>
       </div>
-      <div id="loading" class="loading"><span class="loader-frog"></span><p>Growing the meadow…</p></div>
+      <div id="winner-overlay" class="pause-overlay" hidden>
+        <div class="pause-card winner-card" role="dialog" aria-modal="true" aria-labelledby="winner-title">
+          <svg class="winner-crown" viewBox="0 0 64 48" aria-hidden="true"><path d="M7 39 3 9l17 13L32 3l12 19L61 9l-4 30H7Z"/><path d="M8 43h48"/></svg>
+          <p class="pause-kicker">LAST FROG STANDING</p>
+          <h1 id="winner-title">Arena champion!</h1>
+          <p>You out-hopped every rival and won the city park.</p>
+          <button id="winner-restart-btn" class="primary-button" type="button">Play again</button>
+        </div>
+      </div>
+      <div id="loading" class="loading"><span class="loader-frog"></span><p>Building the city park…</p></div>
     </main>
     <script type="module" src="/src/scene.js"></script>
   </body>

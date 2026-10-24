@@ -35,6 +35,14 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 #scene, #scene canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #scene { touch-action: none; }
+#name-layer { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.frog-name {
+  position: absolute; left: 0; top: 0; padding: 2px 6px; border-radius: 7px;
+  background: rgba(13,43,28,.72); color: #f0f6dd; border: 1px solid rgba(236,247,202,.2);
+  font-family: 'Nunito', sans-serif; font-size: 9px; line-height: 1.15; font-weight: 900; letter-spacing: .05em;
+  white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,.35); will-change: transform;
+}
+.frog-name.player { color: #eaf993; background: rgba(19,57,34,.82); }
 .vignette {
   position: absolute; inset: 0; pointer-events: none; z-index: 1;
   background: linear-gradient(180deg, rgba(8,34,20,.38) 0%, transparent 24%, transparent 62%, rgba(7,28,18,.64) 100%);
@@ -81,15 +89,15 @@ button { -webkit-tap-highlight-color: transparent; }
 #growth-fill { width: 0%; height: 100%; border-radius: inherit; background: var(--lime); transition: width .25s ease-out; box-shadow: 0 0 12px rgba(216,239,114,.35); }
 
 .toast {
-  position: absolute; z-index: 5; top: 43%; left: 50%;
-  transform: translate(-50%, -50%) scale(.9); opacity: 0; pointer-events: none;
-  width: max-content; max-width: calc(100% - 48px); padding: 12px 22px;
-  border: 1px solid rgba(239,251,190,.4); border-radius: 14px;
-  background: #e2f58b; color: #214428; box-shadow: 0 8px 30px rgba(17,51,25,.24);
-  font-family: 'Baloo 2', sans-serif; font-size: 21px; font-weight: 800; text-align: center;
-  transition: opacity .2s ease, transform .2s ease;
+  position: absolute; z-index: 5; top: max(82px, calc(env(safe-area-inset-top) + 70px)); left: 50%;
+  transform: translateX(-50%) scale(.95); opacity: 0; pointer-events: none;
+  width: max-content; max-width: calc(100% - 150px); padding: 8px 13px;
+  border: 1px solid rgba(239,251,190,.32); border-radius: 18px;
+  background: rgba(227,245,145,.96); color: #214428; box-shadow: 0 5px 18px rgba(17,51,25,.2);
+  font-family: 'Nunito', sans-serif; font-size: 12px; line-height: 1.25; font-weight: 900; text-align: center;
+  transition: opacity .18s ease, transform .18s ease;
 }
-.toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.toast.show { opacity: 1; transform: translateX(-50%) scale(1); }
 .ready-indicator {
   position: absolute; z-index: 2; bottom: max(72px, calc(env(safe-area-inset-bottom) + 62px)); left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 7px; color: #eff8d7; font-size: 10px; font-weight: 900; letter-spacing: .13em;
@@ -142,6 +150,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .primary-button { width: 100%; min-height: 52px; border: 0; border-radius: 15px; background: var(--lime); color: #173d29; font-weight: 900; cursor: pointer; box-shadow: 0 4px 0 #8fa746; transition: transform .15s ease; }
 .primary-button:active { transform: translateY(3px); }
 .text-button { min-height: 44px; margin-top: 10px; border: 0; background: transparent; color: #d6e5c5; font-size: 13px; font-weight: 800; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+.winner-card { border-color: rgba(242,189,61,.45); }
+.winner-crown { width: 58px; height: 44px; margin-bottom: 8px; fill: #f2bd3d; stroke: #f2bd3d; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .loading { position: absolute; inset: 0; z-index: 20; display: grid; place-content: center; justify-items: center; gap: 15px; background: #244f32; transition: opacity .35s ease; }
 .loading.done { opacity: 0; pointer-events: none; }
 .loading p { margin: 0; color: #d9e9c5; font-size: 13px; font-weight: 800; letter-spacing: .05em; }
